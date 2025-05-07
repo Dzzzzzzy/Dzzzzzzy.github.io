@@ -13,6 +13,7 @@
             align-items: center;
             min-height: 100vh;
             margin: 0;
+            overflow-x: hidden;
         }
         .container {
             background: #fff;
@@ -20,6 +21,8 @@
             box-shadow: 0 4px 16px rgba(0,0,0,0.08);
             padding: 32px 28px 24px 28px;
             min-width: 320px;
+            position: relative;
+            z-index: 1;
         }
         h2 {
             text-align: center;
@@ -59,6 +62,8 @@
             box-shadow: 0 1px 4px rgba(79,140,255,0.08);
             font-variant-numeric: tabular-nums;
             font-weight: bold;
+            position: relative;
+            z-index: 2;
         }
         .progress-bar {
             margin-top: 16px;
@@ -79,6 +84,84 @@
             color: #888;
             font-size: 14px;
         }
+        .reset-btn {
+            position: absolute;
+            top: 18px;
+            right: 18px;
+            background: #f4f7fa;
+            border: 1px solid #bcd6f5;
+            border-radius: 5px;
+            color: #2369c6;
+            font-size: 13px;
+            padding: 4px 11px;
+            cursor: pointer;
+            transition: background 0.2s;
+            z-index: 3;
+        }
+        .reset-btn:hover {
+            background: #e6f0ff;
+        }
+        /* 弹窗样式 */
+        .modal-backdrop {
+            position: fixed;
+            z-index: 9999;
+            left: 0; top: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.15);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .modal {
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 24px rgba(0,0,0,0.12);
+            padding: 32px 24px 20px 24px;
+            min-width: 260px;
+            max-width: 90vw;
+        }
+        .modal h3 {
+            margin: 0 0 18px 0;
+            font-size: 20px;
+            color: #2369c6;
+            text-align: center;
+        }
+        .modal .form-group {
+            margin-bottom: 14px;
+        }
+        .modal input[type="number"] {
+            text-align: center;
+        }
+        .modal .modal-btn {
+            width: 100%;
+            padding: 9px 0;
+            background: #4f8cff;
+            color: #fff;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            margin-top: 10px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .modal .modal-btn:active {
+            background: #2369c6;
+        }
+        .modal .modal-tip {
+            color: #c00;
+            font-size: 13px;
+            text-align: center;
+            margin-bottom: 8px;
+            min-height: 17px;
+        }
+        /* 烟花Canvas样式 */
+        #fireworkCanvas {
+            position: fixed;
+            left: 0; top: 0;
+            width: 100vw;
+            height: 100vh;
+            pointer-events: none;
+            z-index: 999;
+        }
         @media (max-width: 400px) {
             .container {
                 min-width: unset;
@@ -88,16 +171,10 @@
     </style>
 </head>
 <body>
+    <canvas id="fireworkCanvas"></canvas>
     <div class="container">
+        <button class="reset-btn" id="resetBtn" title="重新设置">重新设置</button>
         <h2>今日实时薪资</h2>
-        <div class="form-group">
-            <label for="salary">每月工资（元）</label>
-            <input type="number" id="salary" placeholder="请输入每月工资">
-        </div>
-        <div class="form-group">
-            <label for="days">每月工作天数</label>
-            <input type="number" id="days" placeholder="请输入工作天数">
-        </div>
         <div class="form-group">
             <label for="hours">每天工作时长（小时）</label>
             <input type="number" id="hours" placeholder="请输入工作时长">
@@ -116,15 +193,172 @@
             工作时间内，工资实时增长
         </div>
     </div>
+
+    <!-- 弹窗 -->
+    <div class="modal-backdrop" id="modalBackdrop" style="display:none;">
+        <div class="modal">
+            <h3>设置隐私信息</h3>
+            <div class="modal-tip" id="modalTip"></div>
+            <div class="form-group">
+                <label for="modalSalary">每月工资（元）</label>
+                <input type="number" id="modalSalary" placeholder="请输入每月工资">
+            </div>
+            <div class="form-group">
+                <label for="modalDays">每月工作天数</label>
+                <input type="number" id="modalDays" placeholder="请输入每月工作天数">
+            </div>
+            <button class="modal-btn" id="modalOkBtn">确定</button>
+        </div>
+    </div>
+
     <script>
-        const salaryInput = document.getElementById('salary');
-        const daysInput = document.getElementById('days');
+        // 隐私数据
+        let salary = null;
+        let days = null;
+
+        // 记录上一次触发烟花的10元金额
+        let lastFireworkAmount = 0;
+
+        // DOM
         const hoursInput = document.getElementById('hours');
         const startTimeInput = document.getElementById('startTime');
         const resultDiv = document.getElementById('result');
         const progressBarInner = document.getElementById('progressBarInner');
         const tipDiv = document.getElementById('tip');
+        const resetBtn = document.getElementById('resetBtn');
 
+        // Modal
+        const modalBackdrop = document.getElementById('modalBackdrop');
+        const modalSalaryInput = document.getElementById('modalSalary');
+        const modalDaysInput = document.getElementById('modalDays');
+        const modalOkBtn = document.getElementById('modalOkBtn');
+        const modalTip = document.getElementById('modalTip');
+
+        // 烟花Canvas
+        const canvas = document.getElementById('fireworkCanvas');
+        let ctx = canvas.getContext('2d');
+        let fireworks = [];
+        let resizeTimeout = null;
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', function() {
+            clearTimeout(resizeTimeout);
+            resizeTimeout = setTimeout(resizeCanvas, 100);
+        });
+        resizeCanvas();
+
+        // 烟花特效
+        function randomColor() {
+            const colors = [
+                "#ff5252", "#ffb142", "#ffd32a", "#32ff7e", "#18dcff", "#7d5fff", "#b33771", "#f7f1e3"
+            ];
+            return colors[Math.floor(Math.random() * colors.length)];
+        }
+
+        function launchFireworkAt(x, y) {
+            for (let i = 0; i < 25; i++) {
+                let angle = (Math.PI * 2 / 25) * i;
+                let speed = 2 + Math.random() * 2;
+                fireworks.push({
+                    x: x,
+                    y: y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    alpha: 1,
+                    color: randomColor(),
+                    decay: 0.016 + Math.random() * 0.012
+                });
+            }
+        }
+        function launchRandomFirework() {
+            // 屏幕中间上1/2区域随机
+            const x = window.innerWidth * (0.3 + 0.4 * Math.random());
+            const y = window.innerHeight * (0.2 + 0.3 * Math.random());
+            launchFireworkAt(x, y);
+        }
+
+        function drawFireworks() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            for (let i = fireworks.length - 1; i >= 0; i--) {
+                let f = fireworks[i];
+                ctx.save();
+                ctx.globalAlpha = f.alpha;
+                ctx.beginPath();
+                ctx.arc(f.x, f.y, 3, 0, 2 * Math.PI);
+                ctx.fillStyle = f.color;
+                ctx.shadowColor = f.color;
+                ctx.shadowBlur = 12;
+                ctx.fill();
+                ctx.restore();
+
+                f.x += f.vx;
+                f.y += f.vy;
+                f.vy += 0.04; // gravity
+                f.alpha -= f.decay;
+                if (f.alpha <= 0) {
+                    fireworks.splice(i, 1);
+                }
+            }
+            if (fireworks.length > 0) {
+                requestAnimationFrame(drawFireworks);
+            }
+        }
+        function fireworkOnce() {
+            launchRandomFirework();
+            if (fireworks.length === 25) { // 刚刚加进来
+                drawFireworks();
+            }
+        }
+
+        // 弹窗逻辑
+        function showModal() {
+            modalBackdrop.style.display = 'flex';
+            modalTip.textContent = '';
+            modalSalaryInput.value = salary !== null ? salary : '';
+            modalDaysInput.value = days !== null ? days : '';
+            setTimeout(() => {
+                modalSalaryInput.focus();
+            }, 100);
+        }
+
+        function hideModal() {
+            modalBackdrop.style.display = 'none';
+        }
+
+        modalOkBtn.onclick = function() {
+            const s = parseFloat(modalSalaryInput.value);
+            const d = parseInt(modalDaysInput.value, 10);
+            if (isNaN(s) || s <= 0) {
+                modalTip.textContent = '请输入有效的每月工资';
+                modalSalaryInput.focus();
+                return;
+            }
+            if (isNaN(d) || d <= 0) {
+                modalTip.textContent = '请输入有效的每月工作天数';
+                modalDaysInput.focus();
+                return;
+            }
+            salary = s;
+            days = d;
+            hideModal();
+            lastFireworkAmount = 0;
+            calculate();
+        };
+
+        resetBtn.onclick = function() {
+            showModal();
+        };
+
+        // 禁止点击遮罩层关闭
+        modalBackdrop.addEventListener('click', function(e){
+            if(e.target === modalBackdrop){
+                e.stopPropagation();
+            }
+        });
+
+        // 解析时间
         function parseTime(timeStr) {
             const parts = timeStr.split(':');
             return {
@@ -133,12 +367,17 @@
             };
         }
 
+        let lastEarned = 0;
         function calculate() {
-            const salary = parseFloat(salaryInput.value);
-            const days = parseInt(daysInput.value, 10);
             const hours = parseFloat(hoursInput.value);
             const startTimeStr = startTimeInput.value || "09:00";
-            if (isNaN(salary) || isNaN(days) || isNaN(hours) || days <= 0 || hours <= 0) {
+            if (salary === null || days === null) {
+                resultDiv.textContent = '今日已赚：-- 元';
+                progressBarInner.style.width = '0%';
+                tipDiv.textContent = '请先设置工资信息';
+                return;
+            }
+            if (isNaN(hours) || hours <= 0) {
                 resultDiv.textContent = '今日已赚：-- 元';
                 progressBarInner.style.width = '0%';
                 tipDiv.textContent = '请填写完整信息';
@@ -176,19 +415,33 @@
                 tipDiv.textContent = "工作时间内，工资实时增长";
             }
 
+            // 烟花特效（每增加10元触发一次）
+            const cur10 = Math.floor(todayEarned / 10);
+            if (cur10 > lastFireworkAmount && todayEarned > 0) {
+                fireworkOnce();
+                lastFireworkAmount = cur10;
+            }
             resultDiv.textContent = '今日已赚：' + todayEarned.toFixed(2) + ' 元';
             progressBarInner.style.width = progress + '%';
+            lastEarned = todayEarned;
         }
 
-        salaryInput.addEventListener('input', calculate);
-        daysInput.addEventListener('input', calculate);
-        hoursInput.addEventListener('input', calculate);
-        startTimeInput.addEventListener('input', calculate);
+        hoursInput.addEventListener('input', function(){
+            lastFireworkAmount = 0; // 重新输入时重置烟花进度
+            calculate();
+        });
+        startTimeInput.addEventListener('input', function(){
+            lastFireworkAmount = 0;
+            calculate();
+        });
 
         // 每秒更新时间
         setInterval(calculate, 1000);
-        // 初始计算
-        calculate();
+
+        // 页面加载时先弹窗
+        window.onload = function() {
+            showModal();
+        };
     </script>
 </body>
 </html>
